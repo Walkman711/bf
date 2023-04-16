@@ -8,11 +8,11 @@ pub struct Processor {
     /// Address pointer to tape
     ap: usize,
     tape: Vec<u8>,
-    parsed_program: Vec<Opcodes>,
+    parsed_program: Vec<Opcode>,
 }
 
 #[derive(Clone, Copy, Debug)]
-pub enum Opcodes {
+pub enum Opcode {
     Right,
     Left,
     Inc,
@@ -33,16 +33,16 @@ impl Processor {
         }
     }
 
-    fn parse(program: &str) -> Vec<Opcodes> {
+    fn parse(program: &str) -> Vec<Opcode> {
         let mut res = vec![];
         for (pc, c) in program.chars().enumerate() {
             match c {
-                '>' => res.push(Opcodes::Right),
-                '<' => res.push(Opcodes::Left),
-                '+' => res.push(Opcodes::Inc),
-                '-' => res.push(Opcodes::Dec),
-                '.' => res.push(Opcodes::Disp),
-                ',' => res.push(Opcodes::Read),
+                '>' => res.push(Opcode::Right),
+                '<' => res.push(Opcode::Left),
+                '+' => res.push(Opcode::Inc),
+                '-' => res.push(Opcode::Dec),
+                '.' => res.push(Opcode::Disp),
+                ',' => res.push(Opcode::Read),
                 '[' => {
                     let mut stack = vec![];
                     let mut i = pc;
@@ -52,7 +52,7 @@ impl Processor {
                             ']' => {
                                 stack.pop();
                                 if stack.is_empty() {
-                                    res.push(Opcodes::JpZero(i));
+                                    res.push(Opcode::JpZero(i));
                                     break;
                                 }
                             }
@@ -70,7 +70,7 @@ impl Processor {
                             '[' => {
                                 stack.pop();
                                 if stack.is_empty() {
-                                    res.push(Opcodes::JpNonZero(i as u64 as usize));
+                                    res.push(Opcode::JpNonZero(i as u64 as usize));
                                     break;
                                 }
                             }
@@ -91,24 +91,24 @@ impl Processor {
         }
     }
 
-    fn parsed_step(&mut self, op: Opcodes) {
+    fn parsed_step(&mut self, op: Opcode) {
         match op {
-            Opcodes::Right => self.ap += 1,
-            Opcodes::Left => self.ap -= 1,
-            Opcodes::Inc => self.tape[self.ap] = self.tape[self.ap].wrapping_add(1),
-            Opcodes::Dec => self.tape[self.ap] = self.tape[self.ap].wrapping_sub(1),
-            Opcodes::Disp => print!("{}", self.tape[self.ap] as char),
-            Opcodes::Read => {
+            Opcode::Right => self.ap += 1,
+            Opcode::Left => self.ap -= 1,
+            Opcode::Inc => self.tape[self.ap] = self.tape[self.ap].wrapping_add(1),
+            Opcode::Dec => self.tape[self.ap] = self.tape[self.ap].wrapping_sub(1),
+            Opcode::Disp => print!("{}", self.tape[self.ap] as char),
+            Opcode::Read => {
                 let mut input: [u8; 1] = [0; 1];
                 std::io::stdin().read_exact(&mut input).unwrap();
                 self.tape[self.ap] = input[0];
             }
-            Opcodes::JpZero(dst) => {
+            Opcode::JpZero(dst) => {
                 if self.tape[self.ap] == 0 {
                     self.pc = dst;
                 }
             }
-            Opcodes::JpNonZero(dst) => {
+            Opcode::JpNonZero(dst) => {
                 if self.tape[self.ap] != 0 {
                     self.pc = dst;
                 }
@@ -116,14 +116,9 @@ impl Processor {
         }
     }
 
-    fn get_op(&mut self) -> Option<Opcodes> {
-        let op = self.parsed_program.get(self.pc);
-        let res = match op {
-            Some(op) => Some(*op),
-            None => None,
-        };
+    fn get_op(&mut self) -> Option<Opcode> {
         self.pc += 1;
-        res
+        self.parsed_program.get(self.pc - 1).map(|o| *o)
     }
 }
 
