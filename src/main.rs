@@ -1,6 +1,15 @@
-#![allow(dead_code)]
+use std::{collections::HashMap, fs, io::Read};
 
-use std::{fs, io::Read};
+use clap::Parser;
+
+#[derive(Parser, Debug)]
+struct Args {
+    #[arg(short, long)]
+    program: String,
+
+    #[arg(short, long)]
+    numeric_output: bool,
+}
 
 pub struct Processor {
     /// Location in program
@@ -9,6 +18,7 @@ pub struct Processor {
     ap: usize,
     tape: Vec<u8>,
     parsed_program: Vec<Opcode>,
+    numeric_output: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -24,17 +34,36 @@ pub enum Opcode {
 }
 
 impl Processor {
-    pub fn new(program: &str, tape_len: usize) -> Self {
+    pub fn new(program: &str, numeric_output: bool, tape_len: usize) -> Self {
         Self {
             pc: 0,
             ap: 0,
             tape: vec![0; tape_len],
             parsed_program: Self::parse(program),
+            numeric_output,
         }
     }
 
     fn parse(program: &str) -> Vec<Opcode> {
         let mut res = vec![];
+        let mut stack = vec![];
+        let mut open_to_close = HashMap::new();
+        let mut close_to_open = HashMap::new();
+
+        // First pass to compute bracket matches
+        for (pc, c) in program.chars().enumerate() {
+            match c {
+                '[' => stack.push(pc),
+                ']' => {
+                    let matching_bracket = stack.pop().expect("malformed program");
+                    open_to_close.insert(matching_bracket, pc);
+                    close_to_open.insert(pc, matching_bracket);
+                }
+                _ => {}
+            }
+        }
+
+        // Second pass to build the parsed program
         for (pc, c) in program.chars().enumerate() {
             match c {
                 '>' => res.push(Opcode::Right),
@@ -43,45 +72,16 @@ impl Processor {
                 '-' => res.push(Opcode::Dec),
                 '.' => res.push(Opcode::Disp),
                 ',' => res.push(Opcode::Read),
-                '[' => {
-                    let mut stack = vec![];
-                    let mut i = pc;
-                    while i <= program.len() {
-                        match program.chars().nth(i).unwrap() {
-                            '[' => stack.push('['),
-                            ']' => {
-                                stack.pop();
-                                if stack.is_empty() {
-                                    res.push(Opcode::JpZero(i));
-                                    break;
-                                }
-                            }
-                            _ => {}
-                        }
-                        i += 1;
-                    }
-                }
-                ']' => {
-                    let mut stack = vec![];
-                    let mut i: i64 = pc as u64 as i64;
-                    while i >= 0 {
-                        match program.chars().nth(i as u64 as usize).unwrap() {
-                            ']' => stack.push(']'),
-                            '[' => {
-                                stack.pop();
-                                if stack.is_empty() {
-                                    res.push(Opcode::JpNonZero(i as u64 as usize));
-                                    break;
-                                }
-                            }
-                            _ => {}
-                        }
-                        i -= 1;
-                    }
-                }
+                '[' => res.push(Opcode::JpZero(
+                    *open_to_close.get(&pc).expect("malformed program"),
+                )),
+                ']' => res.push(Opcode::JpNonZero(
+                    *close_to_open.get(&pc).expect("malformed program"),
+                )),
                 _ => { /* Spec is to ignore other characters */ }
             }
         }
+
         res
     }
 
@@ -97,7 +97,13 @@ impl Processor {
             Opcode::Left => self.ap -= 1,
             Opcode::Inc => self.tape[self.ap] = self.tape[self.ap].wrapping_add(1),
             Opcode::Dec => self.tape[self.ap] = self.tape[self.ap].wrapping_sub(1),
-            Opcode::Disp => print!("{}", self.tape[self.ap] as char),
+            Opcode::Disp => {
+                if self.numeric_output {
+                    println!("{:#04x}", self.tape[self.ap])
+                } else {
+                    print!("{}", self.tape[self.ap] as char)
+                }
+            }
             Opcode::Read => {
                 let mut input: [u8; 1] = [0; 1];
                 std::io::stdin().read_exact(&mut input).unwrap();
@@ -118,12 +124,13 @@ impl Processor {
 
     fn get_op(&mut self) -> Option<Opcode> {
         self.pc += 1;
-        self.parsed_program.get(self.pc - 1).map(|o| *o)
+        self.parsed_program.get(self.pc - 1).copied()
     }
 }
 
 fn main() {
-    let prog = fs::read_to_string("hello_world.bfk").unwrap();
-    let mut proc = Processor::new(&prog, 10);
+    let args = Args::parse();
+    let prog = fs::read_to_string(&args.program).unwrap();
+    let mut proc = Processor::new(&prog, args.numeric_output, 10);
     proc.run();
 }
